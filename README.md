@@ -1,6 +1,9 @@
 Space taxi
 An interactive simulation of a shuttle running between Earth and Mars, planned with real orbital mechanics. It is packaged as a single HTML file with no build step and no dependencies.
 The taxi waits on each planet until Earth and Mars line up, flies the best trajectory it can find under your rules, and returns at the next good launch window. Every trip is designed with a Lambert solver, the same technique mission planners use, and every candidate trajectory is shown on a porkchop plot you can click to choose your own.
+
+<img width="984" height="721" alt="image" src="https://github.com/user-attachments/assets/8ca54a97-24e7-48b3-8948-350fa4e18f35" />
+
 Quick start
 Open `space-taxi.html` in any modern browser (Chrome, Firefox, Safari, Edge).
 The page works offline. It loads two typefaces (Cormorant Garamond and IBM Plex Sans) from Google Fonts when a connection is available and falls back to system fonts otherwise.
