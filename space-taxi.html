@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Space taxi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,500;1,600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{ --bg:#E6ECF4; --chart:#F3F6FA; --ink:#1B2A4A; --muted:#5A6B8C; --rule:rgba(27,42,74,.14); --focus:#1E7FA8; --craft:#1B2A4A; }
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --bg:#0C1428; --chart:#0F1930; --ink:#D8E0EE; --muted:#8A9ABA; --rule:rgba(216,224,238,.11); --focus:#6EC5E9; --craft:#F4F7FB; } }
+:root[data-theme="dark"]{ --bg:#0C1428; --chart:#0F1930; --ink:#D8E0EE; --muted:#8A9ABA; --rule:rgba(216,224,238,.11); --focus:#6EC5E9; --craft:#F4F7FB; }
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{max-width:1340px;margin:0 auto;padding:20px 20px 32px}
+header{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap;margin-bottom:14px}
+h1{font:italic 600 clamp(34px,5vw,52px)/1 "Cormorant Garamond",Georgia,serif;margin:0;letter-spacing:-.01em}
+header p{margin:0;color:var(--muted);max-width:66ch}
+.layout{display:grid;grid-template-columns:1fr 320px;gap:18px}
+@media (max-width:900px){.layout{grid-template-columns:1fr}}
+.main{display:flex;flex-direction:column;gap:18px;min-width:0}
+.panel{position:relative;background:var(--chart);border:1px solid var(--rule);border-radius:14px;overflow:hidden}
+.stage{height:min(66vh,660px);min-height:380px;touch-action:none}
+canvas{display:block;width:100%;height:100%}
+#cv{cursor:grab} #cv.panning{cursor:grabbing}
+.status{position:absolute;left:16px;top:10px;pointer-events:none;max-width:calc(100% - 32px)}
+.status .big{font:italic 600 30px/1.1 "Cormorant Garamond",Georgia,serif}
+.status .phase{font-size:15px;margin-top:2px}
+.status .small{color:var(--muted);font-size:13px}
+.hint{position:absolute;right:14px;bottom:10px;color:var(--muted);font-size:13px;pointer-events:none}
+.pork{padding:14px 16px 10px}
+.pork h2{margin:0}
+.pork .sub{color:var(--muted);font-size:13px;margin:2px 0 8px;max-width:80ch}
+.porkwrap{height:290px;position:relative}
+#pc{cursor:crosshair}
+#tip{min-height:1.5em;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+aside{display:flex;flex-direction:column;gap:20px}
+h2{font:italic 600 22px/1.1 "Cormorant Garamond",Georgia,serif;margin:0 0 8px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+button{font:inherit;font-size:14px;color:var(--ink);background:transparent;border:1px solid var(--rule);border-radius:8px;padding:6px 11px;cursor:pointer}
+button:hover{border-color:var(--muted)}
+button.on{background:var(--ink);color:var(--chart);border-color:var(--ink)}
+button.primary{background:var(--ink);color:var(--chart);border-color:var(--ink);min-width:80px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+label.slider{display:grid;grid-template-columns:1fr auto;align-items:center;gap:2px 10px;font-size:14px}
+label.slider input{grid-column:1/-1;width:100%;accent-color:var(--ink)}
+label.slider.off{opacity:.45}
+output{color:var(--muted);font-variant-numeric:tabular-nums}
+.stack{display:flex;flex-direction:column;gap:10px}
+dl{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;margin:0;font-size:14px}
+dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.note{color:var(--muted);font-size:13px;margin:0}
+ol.log{margin:0;padding:0;list-style:none;font-size:13px;display:flex;flex-direction:column;gap:5px}
+ol.log time{color:var(--muted);display:block;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Space taxi</h1>
+    <p>A shuttle running between Earth and Mars on real orbital mechanics. It waits on each planet until the two line up, flies the most efficient path it can find, and heads home at the next good window.</p>
+  </header>
+  <div class="layout">
+    <div class="main">
+      <div class="panel stage" id="stage">
+        <canvas id="cv" aria-label="Map of the inner solar system showing the taxi's route"></canvas>
+        <div class="status"><div class="big" id="date"></div><div class="phase" id="phase"></div><div class="small" id="geom"></div></div>
+        <div class="hint">Drag to pan · scroll or pinch to zoom</div>
+      </div>
+      <div class="panel pork">
+        <h2 id="porkTitle">Launch options</h2>
+        <p class="sub">Every point is a possible trajectory, placed by launch date and flight time. Blue needs the least fuel. The ring marks the trip the taxi will fly; click another point to fly that one instead.</p>
+        <div class="porkwrap"><canvas id="pc" aria-label="Porkchop plot of launch dates and flight times coloured by fuel needed"></canvas></div>
+        <div id="tip"></div>
+      </div>
+    </div>
+    <aside>
+      <section class="stack">
+        <h2>Clock</h2>
+        <div class="row">
+          <button class="primary" id="play">Pause</button>
+          <button id="skip">Skip to launch</button>
+          <button id="restart">Start over</button>
+        </div>
+        <label class="slider">Speed<output id="spo"></output><input type="range" id="speed" min="1" max="200" step="1" value="30"></label>
+      </section>
+      <section class="stack">
+        <h2>Taxi rules</h2>
+        <div class="row" id="mode">
+          <button data-m="fuel" class="on">Use least fuel</button>
+          <button data-m="fast">Fly fastest</button>
+        </div>
+        <label class="slider off" id="budgetWrap">Fuel budget per trip<output id="bo"></output><input type="range" id="budget" min="5.5" max="20" step="0.5" value="9" disabled></label>
+        <label class="slider">Longest allowed flight<output id="mto"></output><input type="range" id="maxTof" min="120" max="450" step="10" value="400"></label>
+        <label class="slider">Shortest stay on Mars<output id="smo"></output><input type="range" id="stayMars" min="0" max="700" step="10" value="30"></label>
+        <label class="slider">Shortest stay on Earth<output id="seo"></output><input type="range" id="stayEarth" min="0" max="700" step="10" value="30"></label>
+        <p class="note">Rule changes apply to the next trip the taxi hasn't started yet.</p>
+      </section>
+      <section class="stack">
+        <h2 id="legTitle">Next trip</h2>
+        <dl id="legFacts"></dl>
+        <p class="note">Fuel is measured as Δv, the change in speed the engines must provide: one burn to leave a low parking orbit and one to be captured into orbit at the other end.</p>
+      </section>
+      <section class="stack">
+        <h2>Service record</h2>
+        <dl id="totals"></dl>
+      </section>
+      <section class="stack">
+        <h2>Log</h2>
+        <ol class="log" id="log"></ol>
+      </section>
+    </aside>
+  </div>
+</div>
+<script>
+// ---------- orbital core (shared by app and tests) ----------
+const DAY=864e5, YEAR_MS=365.25*DAY, J2000=Date.UTC(2000,0,1,12), DEG=Math.PI/180, MU=4*Math.PI*Math.PI, KMS=4.740470;
+const PLANETS={
+ Mercury:{a:0.38709927,e:0.20563593,L0:252.25032350,Ld:149472.67411175,w0:77.45779628,wd:0.16047689,color:'#A8A29A'},
+ Venus:{a:0.72333566,e:0.00677672,L0:181.97909950,Ld:58517.81538729,w0:131.60246718,wd:0.00268329,color:'#E3BF78'},
+ Earth:{a:1.00000261,e:0.01671123,L0:100.46457166,Ld:35999.37244981,w0:102.93768193,wd:0.32327364,color:'#4F8FE0'},
+ Mars:{a:1.52371034,e:0.09339410,L0:-4.55343205,Ld:19140.30268499,w0:-23.94362959,wd:0.44441088,color:'#D0603A'},
+};
+const PARK={Earth:{mu:398600.4418,r:6378.1+400,name:'400 km Earth orbit'}, Mars:{mu:42828.37,r:3389.5+300,name:'300 km Mars orbit'}};
+function solveKepler(M,e){ let E=e<0.8?M:Math.PI; for(let i=0;i<30;i++){ const d=(E-e*Math.sin(E)-M)/(1-e*Math.cos(E)); E-=d; if(Math.abs(d)<1e-13) break; } return E; }
+function helio(name,ms){
+  const d=PLANETS[name], T=(ms-J2000)/(DAY*36525), L=(d.L0+d.Ld*T)*DEG, w=(d.w0+d.wd*T)*DEG;
+  const M=((L-w)%(2*Math.PI)+2*Math.PI)%(2*Math.PI), E=solveKepler(M,d.e), q=Math.sqrt(1-d.e*d.e);
+  const n=Math.sqrt(MU/d.a**3), Ed=n/(1-d.e*Math.cos(E));
+  const px=d.a*(Math.cos(E)-d.e), py=d.a*q*Math.sin(E), vx=-d.a*Math.sin(E)*Ed, vy=d.a*q*Math.cos(E)*Ed, c=Math.cos(w), s=Math.sin(w);
+  return {x:px*c-py*s, y:px*s+py*c, vx:vx*c-vy*s, vy:vx*s+vy*c};
+}
+function stumpff(z){
+  if(z>1e-6){ const s=Math.sqrt(z); return [(s-Math.sin(s))/(s*s*s),(1-Math.cos(s))/z]; }
+  if(z<-1e-6){ const s=Math.sqrt(-z); return [(Math.sinh(s)-s)/(s*s*s),(Math.cosh(s)-1)/(-z)]; }
+  return [1/6,1/2];
+}
+// Single-revolution prograde Lambert solver (universal variables, bisection). Units AU, years.
+function lambert(r1x,r1y,r2x,r2y,T){
+  const r1=Math.hypot(r1x,r1y), r2=Math.hypot(r2x,r2y);
+  let cd=(r1x*r2x+r1y*r2y)/(r1*r2); cd=Math.max(-1,Math.min(1,cd));
+  let dth=Math.acos(cd); if(r1x*r2y-r1y*r2x<0) dth=2*Math.PI-dth;
+  const A=Math.sin(dth)*Math.sqrt(r1*r2/(1-cd)); if(!isFinite(A)||Math.abs(A)<1e-7) return null;
+  const sq=Math.sqrt(MU);
+  const yz=z=>{ const [S,C]=stumpff(z); return [r1+r2+A*(z*S-1)/Math.sqrt(C),S,C]; };
+  let lo=-60, hi=4*Math.PI*Math.PI-1e-5;
+  for(let k=0;k<52;k++){ const z=(lo+hi)/2, [y,S,C]=yz(z);
+    if(y<0){ lo=z; continue; }
+    const t=((y/C)**1.5*S + A*Math.sqrt(y))/sq; if(t<T) lo=z; else hi=z; }
+  const [y]=yz((lo+hi)/2); if(y<0) return null;
+  const f=1-y/r1, g=A*Math.sqrt(y/MU), gd=1-y/r2;
+  return {v1x:(r2x-f*r1x)/g, v1y:(r2y-f*r1y)/g, v2x:(gd*r2x-r1x)/g, v2y:(gd*r2y-r1y)/g};
+}
+const burn=(vinf,p)=>Math.sqrt(vinf*vinf+2*p.mu/p.r)-Math.sqrt(p.mu/p.r);
+function evalTransfer(from,to,dep,tofDays){
+  const A=helio(from,dep), B=helio(to,dep+tofDays*DAY), sol=lambert(A.x,A.y,B.x,B.y,tofDays/365.25);
+  if(!sol) return null;
+  const en=(sol.v1x**2+sol.v1y**2)/2-MU/Math.hypot(A.x,A.y); if(!(en<0)) return null;
+  const vinfDep=Math.hypot(sol.v1x-A.vx,sol.v1y-A.vy)*KMS, vinfArr=Math.hypot(sol.v2x-B.vx,sol.v2y-B.vy)*KMS;
+  const dvDep=burn(vinfDep,PARK[from]), dvArr=burn(vinfArr,PARK[to]);
+  if(!isFinite(dvDep+dvArr)) return null;
+  return {A,B,sol,vinfDep,vinfArr,dvDep,dvArr,total:dvDep+dvArr};
+}
+const G_DEP_STEP=4, G_DEP_SPAN=800, G_TOF_MIN=90, G_TOF_MAX=450, G_TOF_STEP=5;
+function planLeg(from,to,earliest,opts){
+  const nd=Math.floor(G_DEP_SPAN/G_DEP_STEP)+1, nt=Math.floor((G_TOF_MAX-G_TOF_MIN)/G_TOF_STEP)+1;
+  const vals=new Float32Array(nd*nt).fill(NaN);
+  let min=Infinity;
+  for(let i=0;i<nd;i++) for(let j=0;j<nt;j++){
+    const tr=evalTransfer(from,to,earliest+i*G_DEP_STEP*DAY,G_TOF_MIN+j*G_TOF_STEP);
+    if(tr){ vals[i*nt+j]=tr.total; if(tr.total<min) min=tr.total; } }
+  const grid={from,to,dep0:earliest,nd,nt,vals,min};
+  const better=(a,b)=>{ // is candidate a better than b?
+    if(!b) return true;
+    if(opts.mode==='fast'){ const ao=a.total<=opts.budget, bo=b.total<=opts.budget;
+      if(ao!==bo) return ao; if(ao) return a.tof<b.tof-1e-9 || (Math.abs(a.tof-b.tof)<1e-9 && a.total<b.total); }
+    return a.total<b.total; };
+  let best=null;
+  for(let i=0;i<nd;i++) for(let j=0;j<nt;j++){ const v=vals[i*nt+j], tof=G_TOF_MIN+j*G_TOF_STEP;
+    if(isNaN(v)||tof>opts.maxTof) continue; const c={dep:earliest+i*G_DEP_STEP*DAY,tof,total:v}; if(better(c,best)) best=c; }
+  if(!best) return null;
+  let fine=best; // local refinement
+  for(let dd=-3;dd<=3;dd+=0.5) for(let dt=-5;dt<=5;dt+=1){
+    const dep=best.dep+dd*DAY, tof=best.tof+dt; if(dep<earliest||tof>opts.maxTof||tof<G_TOF_MIN) continue;
+    const tr=evalTransfer(from,to,dep,tof); if(tr){ const c={dep,tof,total:tr.total}; if(better(c,fine)) fine=c; } }
+  const leg=makeLeg(from,to,fine.dep,fine.tof,earliest,grid);
+  leg.overBudget = opts.mode==='fast' && leg.total>opts.budget;
+  return leg;
+}
+function makeLeg(from,to,dep,tof,earliest,grid){
+  const tr=evalTransfer(from,to,dep,tof); if(!tr) return null;
+  const {A,sol}=tr, x=A.x,y=A.y,vx=sol.v1x,vy=sol.v1y, r=Math.hypot(x,y), v2=vx*vx+vy*vy, rv=x*vx+y*vy;
+  const a=1/(2/r-v2/MU), ex=((v2-MU/r)*x-rv*vx)/MU, ey=((v2-MU/r)*y-rv*vy)/MU, e=Math.hypot(ex,ey), w=Math.atan2(ey,ex);
+  const nu=Math.atan2(y,x)-w, E0=2*Math.atan2(Math.sqrt(1-e)*Math.sin(nu/2),Math.sqrt(1+e)*Math.cos(nu/2));
+  return {from,to,dep,tof,arr:dep+tof*DAY,earliest,grid,...tr,orbit:{a,e,w,M0:E0-e*Math.sin(E0),n:Math.sqrt(MU/a**3)}};
+}
+function legPos(leg,ms){
+  const o=leg.orbit, M=o.M0+o.n*(ms-leg.dep)/YEAR_MS, E=solveKepler(((M%(2*Math.PI))+2*Math.PI)%(2*Math.PI),o.e);
+  const px=o.a*(Math.cos(E)-o.e), py=o.a*Math.sqrt(1-o.e*o.e)*Math.sin(E), c=Math.cos(o.w), s=Math.sin(o.w);
+  return [px*c-py*s, px*s+py*c];
+}
+(() => {
+const $=id=>document.getElementById(id);
+const cv=$('cv'), ctx=cv.getContext('2d'), pc=$('pc'), pctx=pc.getContext('2d'), stage=$('stage');
+let css={}; const readCss=()=>{ const s=getComputedStyle(document.documentElement); for(const k of ['ink','muted','rule','chart','craft']) css[k]=s.getPropertyValue('--'+k).trim(); porkImage=null; };
+let porkImage=null; readCss(); matchMedia('(prefers-color-scheme: dark)').addEventListener('change',readCss);
+const fmt=(n,d=1)=>n.toLocaleString('en-GB',{minimumFractionDigits:d,maximumFractionDigits:d});
+const fdate=ms=>new Date(ms).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'});
+const today=()=>{ const d=new Date(); return Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate()); };
+
+let simMs, phase, leg, history, logItems, running=true, stats;
+const opts=()=>({mode:document.querySelector('#mode .on').dataset.m, budget:+$('budget').value, maxTof:+$('maxTof').value});
+const stay=place=>+$(place==='Mars'?'stayMars':'stayEarth').value;
+
+function start(){
+  simMs=today(); history=[]; logItems=[]; stats={trips:0,days:0,dv:0,round:0};
+  phase='wait'; leg=plan('Earth','Mars',simMs);
+  addLog(simMs, `Taxi ready on Earth. Best launch: ${fdate(leg.dep)}.`);
+  refreshPanels();
+}
+function plan(from,to,earliest){
+  const l=planLeg(from,to,earliest,opts());
+  porkImage=null; return l;
+}
+function addLog(ms,text){ logItems.push({ms,text}); if(logItems.length>40) logItems.shift();
+  $('log').innerHTML=logItems.slice(-8).reverse().map(l=>`<li><time>${fdate(l.ms)}</time>${l.text}</li>`).join(''); }
+
+function advance(to){
+  for(let guard=0;guard<50;guard++){
+    if(phase==='wait' && to>=leg.dep){ phase='transit'; addLog(leg.dep,`Launched from ${leg.from} toward ${leg.to}. Arrival in ${Math.round(leg.tof)} days.`); refreshPanels(); continue; }
+    if(phase==='transit' && to>=leg.arr){
+      stats.trips++; stats.days+=leg.tof; stats.dv+=leg.total; if(leg.to==='Earth') stats.round++;
+      history.push(leg); if(history.length>6) history.shift();
+      addLog(leg.arr,`Arrived at ${leg.to} after ${Math.round(leg.tof)} days using ${fmt(leg.total)} km/s of Δv.`);
+      const next=plan(leg.to,leg.from,leg.arr+stay(leg.to)*DAY);
+      const wait=Math.round((next.dep-leg.arr)/DAY);
+      addLog(leg.arr,`Next window to ${next.to} opens ${fdate(next.dep)}, ${wait} days away.`);
+      leg=next; phase='wait'; refreshPanels(); continue; }
+    break;
+  }
+  simMs=to;
+}
+function replan(){ if(phase!=='wait') return; const earliest=Math.max(leg.earliest, simMs);
+  const prev=leg.dep; leg=plan(leg.from,leg.to,earliest);
+  if(Math.abs(leg.dep-prev)>DAY) addLog(simMs,`Rules changed. Launch to ${leg.to} now set for ${fdate(leg.dep)}.`);
+  refreshPanels(); }
+
+// ---------- panels ----------
+function refreshPanels(){
+  $('legTitle').textContent = phase==='transit' ? `In flight: ${leg.from} → ${leg.to}` : `Next trip: ${leg.from} → ${leg.to}`;
+  $('porkTitle').textContent = `Launch options, ${leg.from} → ${leg.to}`;
+  const rows=[['Launch',fdate(leg.dep)],['Arrival',fdate(leg.arr)],['Flight time',Math.round(leg.tof)+' days'],
+    ['Leaving '+leg.from,fmt(leg.dvDep,2)+' km/s'],['Capture at '+leg.to,fmt(leg.dvArr,2)+' km/s'],['Total Δv',fmt(leg.total,2)+' km/s'],
+    ['Speed on departure',fmt(leg.vinfDep,2)+' km/s'],['Speed on arrival',fmt(leg.vinfArr,2)+' km/s']];
+  $('legFacts').innerHTML=rows.map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('')+(leg.overBudget?`<dt>Note</dt><dd>No trip fit the budget, so this is the cheapest</dd>`:'')+(leg.manual?`<dt>Chosen</dt><dd>By you on the chart</dd>`:'');
+  $('totals').innerHTML=[['Trips flown',stats.trips],['Round trips',stats.round],['Days in flight',Math.round(stats.days)],['Total Δv',fmt(stats.dv,1)+' km/s']].map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('');
+  $('skip').textContent = phase==='wait' ? 'Skip to launch' : 'Skip to arrival';
+}
+
+// ---------- main view ----------
+let zoom=200, cam={x:0,y:0};
+const W=()=>cv.clientWidth, H=()=>cv.clientHeight;
+const scr=(x,y)=>[W()/2+(x-cam.x)*zoom, H()/2-(y-cam.y)*zoom];
+const unscr=(sx,sy)=>[(sx-W()/2)/zoom+cam.x, -(sy-H()/2)/zoom+cam.y];
+function fit(){ zoom=Math.min(W(),H())/2/1.85; cam={x:0,y:-0.0}; }
+function sizeCanvas(c,g){ const d=devicePixelRatio||1; c.width=c.clientWidth*d; c.height=c.clientHeight*d; g.setTransform(d,0,0,d,0,0); }
+let fitted=false;
+new ResizeObserver(()=>{ sizeCanvas(cv,ctx); if(!fitted){fitted=true; fit();} }).observe(stage);
+new ResizeObserver(()=>{ sizeCanvas(pc,pctx); }).observe(pc.parentElement);
+
+const lon=p=>Math.atan2(p.y,p.x);
+const wrap=a=>{ a=(a+Math.PI)%(2*Math.PI); if(a<0)a+=2*Math.PI; return a-Math.PI; };
+const idealPhase=(from,to)=>{ const a1=PLANETS[from].a, a2=PLANETS[to].a, tH=Math.PI*Math.sqrt((a1+a2)**3/(8*MU)); return wrap(Math.PI-2*Math.PI/a2**1.5*tH); };
+
+function planetOrbit(name){
+  const d=PLANETS[name], T=(simMs-J2000)/(DAY*36525), w=(d.w0+d.wd*T)*DEG, q=Math.sqrt(1-d.e*d.e), c=Math.cos(w), s=Math.sin(w);
+  ctx.beginPath(); for(let k=0;k<=180;k++){ const E=k/180*2*Math.PI, px=d.a*(Math.cos(E)-d.e), py=d.a*q*Math.sin(E); const [x,y]=scr(px*c-py*s,px*s+py*c); k?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.stroke();
+}
+function legPath(l,t0,t1,dashed,alpha,width){
+  if(t1<=t0) return; ctx.save(); ctx.globalAlpha=alpha; ctx.strokeStyle=css.craft; ctx.lineWidth=width; if(dashed) ctx.setLineDash([5,6]);
+  ctx.beginPath(); const n=Math.max(8,Math.ceil((t1-t0)/DAY/2));
+  for(let k=0;k<=n;k++){ const [x,y]=scr(...legPos(l,t0+(t1-t0)*k/n)); k?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.stroke(); ctx.restore();
+}
+function ghost(name,ms,label){
+  const p=helio(name,ms), [x,y]=scr(p.x,p.y);
+  ctx.save(); ctx.strokeStyle=PLANETS[name].color; ctx.setLineDash([2,3]); ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(x,y,8,0,Math.PI*2); ctx.stroke(); ctx.restore();
+  ctx.fillStyle=css.muted; ctx.textAlign='left'; ctx.fillText(label, x+12, y+14);
+}
+function draw(){
+  const w=W(), h=H(); ctx.clearRect(0,0,w,h);
+  ctx.font='13px "IBM Plex Sans", system-ui, sans-serif'; ctx.textBaseline='middle';
+  const [sx,sy]=scr(0,0);
+  ctx.strokeStyle=css.rule; ctx.lineWidth=1;
+  for(const n of ['Mercury','Venus','Earth','Mars']) planetOrbit(n);
+  // past trips
+  history.forEach((l,k)=>legPath(l,l.dep,l.arr,false,.12+.05*k,1.2));
+  // current / planned trip
+  if(phase==='wait'){ legPath(leg,leg.dep,leg.arr,true,.75,1.6); ghost(leg.from,leg.dep,`${leg.from} at launch, ${fdate(leg.dep)}`); ghost(leg.to,leg.arr,`${leg.to} on arrival, ${fdate(leg.arr)}`); }
+  else { legPath(leg,leg.dep,simMs,false,.95,2); legPath(leg,simMs,leg.arr,true,.6,1.4); ghost(leg.to,leg.arr,`${leg.to} on arrival, ${fdate(leg.arr)}`); }
+  // sun
+  const g=ctx.createRadialGradient(sx,sy,0,sx,sy,34); g.addColorStop(0,'rgba(245,184,61,.6)'); g.addColorStop(1,'rgba(245,184,61,0)');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(sx,sy,34,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#F5B83D'; ctx.beginPath(); ctx.arc(sx,sy,10,0,Math.PI*2); ctx.fill();
+  // phase angle between planets while waiting
+  const E=helio('Earth',simMs), M=helio('Mars',simMs);
+  if(phase==='wait'){
+    const [a,b]=leg.from==='Earth'?[E,M]:[M,E]; const R=0.42*zoom, la=lon(a), lb=lon(b), d=wrap(lb-la);
+    ctx.save(); ctx.strokeStyle=css.muted; ctx.globalAlpha=.8; ctx.lineWidth=1;
+    ctx.setLineDash([3,4]); for(const p of [a,b]){ const [x,y]=scr(p.x,p.y); ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(x,y); ctx.stroke(); }
+    ctx.setLineDash([]); ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(sx,sy,R,-la,-(la+d),d>0); ctx.stroke(); ctx.restore();
+  }
+  // planets
+  for(const [n,p,r] of [['Mercury',helio('Mercury',simMs),3],['Venus',helio('Venus',simMs),4.5],['Earth',E,6],['Mars',M,5]]){
+    const [x,y]=scr(p.x,p.y); ctx.fillStyle=PLANETS[n].color; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+    if(n==='Earth'||n==='Mars'){ ctx.fillStyle=css.ink; ctx.textAlign='left'; ctx.fillText(n,x+10,y-10); } }
+  // taxi
+  let tx,ty,ang;
+  if(phase==='wait'){ const p=leg.from==='Earth'?E:M, [x,y]=scr(p.x,p.y), a=simMs/DAY*0.9; tx=x+13*Math.cos(a); ty=y+13*Math.sin(a); ang=a+Math.PI/2; }
+  else { const [x,y]=legPos(leg,simMs), [x2,y2]=legPos(leg,simMs+DAY); [tx,ty]=scr(x,y); const [ux,uy]=scr(x2,y2); ang=Math.atan2(uy-ty,ux-tx); }
+  ctx.save(); ctx.translate(tx,ty); ctx.rotate(ang); ctx.fillStyle=css.craft; ctx.beginPath(); ctx.moveTo(8,0); ctx.lineTo(-6,5); ctx.lineTo(-3,0); ctx.lineTo(-6,-5); ctx.closePath(); ctx.fill(); ctx.restore();
+  if(phase==='transit'){ ctx.fillStyle=css.ink; ctx.textAlign='left'; ctx.fillText('Taxi',tx-12,ty+16); }
+
+  // status text
+  $('date').textContent=fdate(simMs);
+  const dist=Math.hypot(E.x-M.x,E.y-M.y)*149.5978707;
+  if(phase==='wait'){
+    const days=Math.ceil((leg.dep-simMs)/DAY), [a,b]=leg.from==='Earth'?[E,M]:[M,E];
+    const d=wrap(lon(b)-lon(a))/DEG, ideal=idealPhase(leg.from,leg.to)/DEG;
+    $('phase').textContent=`Parked at ${leg.from}. Launch to ${leg.to} in ${days} day${days===1?'':'s'}.`;
+    $('geom').textContent=`${leg.to} is ${Math.abs(d).toFixed(0)}° ${d>=0?'ahead of':'behind'} ${leg.from}; the textbook launch point is ${Math.abs(ideal).toFixed(0)}° ${ideal>=0?'ahead':'behind'} · planets ${fmt(dist,0)} million km apart`;
+  } else {
+    const day=Math.floor((simMs-leg.dep)/DAY)+1, [x,y]=legPos(leg,simMs), P=helio(leg.to,simMs);
+    $('phase').textContent=`En route to ${leg.to}, day ${day} of ${Math.round(leg.tof)}.`;
+    $('geom').textContent=`${fmt(Math.hypot(x,y),2)} AU from the Sun · ${fmt(Math.hypot(x-P.x,y-P.y)*149.5978707,0)} million km to ${leg.to}`;
+  }
+}
+
+// ---------- porkchop plot ----------
+const STOPS=[[44,74,154],[46,134,171],[63,176,143],[167,201,87],[242,193,78],[240,138,75]];
+const RANGE=6;
+function colorFor(v,min){ const t=Math.min(1,(v-min)/RANGE)*(STOPS.length-1), i=Math.min(STOPS.length-2,Math.floor(t)), f=t-i;
+  return STOPS[i].map((c,k)=>Math.round(c+(STOPS[i+1][k]-c)*f)); }
+function buildPorkImage(){
+  const gr=leg.grid, off=document.createElement('canvas'); off.width=gr.nd; off.height=gr.nt;
+  const g=off.getContext('2d'), img=g.createImageData(gr.nd,gr.nt), o=opts();
+  for(let i=0;i<gr.nd;i++) for(let j=0;j<gr.nt;j++){ const v=gr.vals[i*gr.nt+j], p=((gr.nt-1-j)*gr.nd+i)*4;
+    if(isNaN(v)||v>gr.min+RANGE){ img.data[p+3]=0; continue; }
+    const [r,gg,b]=colorFor(v,gr.min); img.data[p]=r; img.data[p+1]=gg; img.data[p+2]=b;
+    const tof=G_TOF_MIN+j*G_TOF_STEP, dim=(tof>o.maxTof)||(o.mode==='fast'&&v>o.budget);
+    img.data[p+3]=dim?70:235; }
+  g.putImageData(img,0,0); porkImage=off;
+}
+const PM={l:52,r:78,t:8,b:30};
+function porkGeom(){ const w=pc.clientWidth,h=pc.clientHeight; return {w,h,pw:w-PM.l-PM.r,ph:h-PM.t-PM.b}; }
+function drawPork(){
+  if(!porkImage) buildPorkImage();
+  const {w,h,pw,ph}=porkGeom(), gr=leg.grid; pctx.clearRect(0,0,w,h);
+  pctx.imageSmoothingEnabled=true; pctx.drawImage(porkImage,PM.l,PM.t,pw,ph);
+  pctx.strokeStyle=css.rule; pctx.lineWidth=1; pctx.strokeRect(PM.l+.5,PM.t+.5,pw,ph);
+  const span=(gr.nd-1)*G_DEP_STEP*DAY, xOf=ms=>PM.l+(ms-gr.dep0)/span*pw, yOf=tof=>PM.t+ph-(tof-G_TOF_MIN)/(G_TOF_MAX-G_TOF_MIN)*ph;
+  pctx.font='12px "IBM Plex Sans", system-ui, sans-serif'; pctx.fillStyle=css.muted; pctx.textBaseline='middle';
+  // axes
+  pctx.textAlign='right'; for(let t=100;t<=450;t+=50){ const y=yOf(t); pctx.fillText(t+' d',PM.l-6,y); pctx.fillRect(PM.l-3,y,3,1); }
+  pctx.textAlign='center'; const d0=new Date(gr.dep0); let m=new Date(Date.UTC(d0.getUTCFullYear(),d0.getUTCMonth()+1,1));
+  const stepM = pw<500?6:3;
+  while(m.getTime()<gr.dep0+span){ if(m.getUTCMonth()%stepM===0){ const x=xOf(m.getTime()); pctx.fillRect(x,PM.t+ph,1,4);
+      pctx.fillText(m.toLocaleDateString('en-GB',{month:'short',year:'numeric',timeZone:'UTC'}),x,PM.t+ph+16); }
+    m=new Date(Date.UTC(m.getUTCFullYear(),m.getUTCMonth()+1,1)); }
+  // max flight time line
+  const o=opts(); if(o.maxTof<G_TOF_MAX){ const y=yOf(o.maxTof); pctx.save(); pctx.setLineDash([4,4]); pctx.strokeStyle=css.ink; pctx.globalAlpha=.6;
+    pctx.beginPath(); pctx.moveTo(PM.l,y); pctx.lineTo(PM.l+pw,y); pctx.stroke(); pctx.restore(); pctx.textAlign='right'; pctx.fillStyle=css.muted; pctx.fillText('flight time limit',PM.l+pw-6,y-8); }
+  // now line
+  if(simMs>=gr.dep0 && simMs<=gr.dep0+span){ const x=xOf(simMs); pctx.save(); pctx.strokeStyle=css.ink; pctx.globalAlpha=.7; pctx.beginPath(); pctx.moveTo(x,PM.t); pctx.lineTo(x,PM.t+ph); pctx.stroke(); pctx.restore();
+    pctx.textAlign='left'; pctx.fillStyle=css.ink; pctx.fillText('now',x+4,PM.t+10); }
+  // chosen trip
+  const cx=xOf(leg.dep), cy=yOf(leg.tof); pctx.strokeStyle=css.ink; pctx.lineWidth=2; pctx.beginPath(); pctx.arc(cx,cy,7,0,Math.PI*2); pctx.stroke();
+  pctx.fillStyle=css.chart; pctx.lineWidth=1; pctx.beginPath(); pctx.arc(cx,cy,2.5,0,Math.PI*2); pctx.fillStyle=css.ink; pctx.fill();
+  // legend
+  const lx=PM.l+pw+22, lh=ph; for(let k=0;k<lh;k++){ const [r,g,b]=colorFor(gr.min+RANGE*(k/lh),gr.min); pctx.fillStyle=`rgb(${r},${g},${b})`; pctx.fillRect(lx,PM.t+k,12,1); }
+  pctx.fillStyle=css.muted; pctx.textAlign='left';
+  for(let k=0;k<=RANGE;k+=2){ const y=PM.t+k/RANGE*lh; pctx.fillText(fmt(gr.min+k,1),lx+16,y); }
+  pctx.save(); pctx.translate(w-6,PM.t+ph/2); pctx.rotate(-Math.PI/2); pctx.textAlign='center'; pctx.fillText('total Δv, km/s',0,0); pctx.restore();
+}
+function porkCell(e){
+  const r=pc.getBoundingClientRect(), {pw,ph}=porkGeom(), gr=leg.grid, x=e.clientX-r.left-PM.l, y=e.clientY-r.top-PM.t;
+  if(x<0||y<0||x>pw||y>ph) return null;
+  const i=Math.round(x/pw*(gr.nd-1)), j=Math.round((1-y/ph)*(gr.nt-1));
+  return {i,j,dep:gr.dep0+i*G_DEP_STEP*DAY,tof:G_TOF_MIN+j*G_TOF_STEP,v:gr.vals[i*gr.nt+j]};
+}
+pc.addEventListener('pointermove',e=>{ const c=porkCell(e); if(!c){ $('tip').textContent=''; return; }
+  $('tip').textContent = isNaN(c.v) ? `Launch ${fdate(c.dep)}, ${c.tof} days: no practical trajectory` : `Launch ${fdate(c.dep)}, ${c.tof}-day flight, arrive ${fdate(c.dep+c.tof*DAY)}: ${fmt(c.v,2)} km/s total Δv`; });
+pc.addEventListener('pointerleave',()=>$('tip').textContent='');
+pc.addEventListener('click',e=>{ const c=porkCell(e); if(!c) return;
+  if(phase!=='wait'){ $('tip').textContent='The taxi is already flying this trip. You can choose the next one after it lands.'; return; }
+  if(isNaN(c.v)){ $('tip').textContent='No practical trajectory there. Pick a coloured point.'; return; }
+  if(c.dep<simMs){ $('tip').textContent='That launch date has already passed. Pick a point right of the today line.'; return; }
+  const nl=makeLeg(leg.from,leg.to,c.dep,c.tof,leg.earliest,leg.grid); if(!nl) return;
+  nl.manual=true; leg=nl; porkImage=null; addLog(simMs,`You picked a new trajectory: launch ${fdate(nl.dep)}, ${nl.tof} days, ${fmt(nl.total,2)} km/s.`); refreshPanels(); });
+
+// ---------- controls ----------
+$('play').onclick=()=>{ running=!running; $('play').textContent=running?'Pause':'Play'; };
+$('skip').onclick=()=>{ advance(Math.max(simMs,(phase==='wait'?leg.dep:leg.arr)-DAY*0.5)); };
+$('restart').onclick=start;
+const outs=()=>{ $('spo').textContent=$('speed').value+' days/s'; $('bo').textContent=fmt(+$('budget').value,1)+' km/s';
+  $('mto').textContent=$('maxTof').value+' days'; $('smo').textContent=$('stayMars').value+' days'; $('seo').textContent=$('stayEarth').value+' days'; };
+['speed','budget','maxTof','stayMars','stayEarth'].forEach(id=>$(id).addEventListener('input',outs)); outs();
+['budget','maxTof'].forEach(id=>$(id).addEventListener('change',replan));
+['stayMars','stayEarth'].forEach(id=>$(id).addEventListener('change',()=>{ porkImage=null; }));
+document.querySelectorAll('#mode button').forEach(b=>b.onclick=()=>{ document.querySelectorAll('#mode button').forEach(x=>x.classList.toggle('on',x===b));
+  const fast=b.dataset.m==='fast'; $('budget').disabled=!fast; $('budgetWrap').classList.toggle('off',!fast); replan(); });
+
+// pan and zoom on the map
+const pointers=new Map(); let pinch=0;
+cv.addEventListener('pointerdown',e=>{ cv.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY}); cv.classList.add('panning');
+  if(pointers.size===2){ const [a,b]=[...pointers.values()]; pinch=Math.hypot(a.x-b.x,a.y-b.y);} });
+cv.addEventListener('pointermove',e=>{ if(!pointers.has(e.pointerId)) return; const prev=pointers.get(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pointers.size===2){ const [a,b]=[...pointers.values()], d=Math.hypot(a.x-b.x,a.y-b.y); if(pinch) zoom=Math.min(20000,Math.max(40,zoom*d/pinch)); pinch=d; return; }
+  cam.x-=(e.clientX-prev.x)/zoom; cam.y+=(e.clientY-prev.y)/zoom; });
+const up=e=>{ pointers.delete(e.pointerId); if(!pointers.size) cv.classList.remove('panning'); if(pointers.size<2) pinch=0; };
+cv.addEventListener('pointerup',up); cv.addEventListener('pointercancel',up);
+cv.addEventListener('wheel',e=>{ e.preventDefault(); const r=cv.getBoundingClientRect(), sx=e.clientX-r.left, sy=e.clientY-r.top, [wx,wy]=unscr(sx,sy);
+  zoom=Math.min(20000,Math.max(40,zoom*Math.exp(-e.deltaY*0.0015))); cam.x=wx-(sx-W()/2)/zoom; cam.y=wy+(sy-H()/2)/zoom; },{passive:false});
+
+// ---------- loop ----------
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000); last=now;
+  if(running) advance(simMs+dt*(+$('speed').value)*DAY);
+  draw(); drawPork(); requestAnimationFrame(frame);
+}
+start();
+if(matchMedia('(prefers-reduced-motion: reduce)').matches){ running=false; $('play').textContent='Play'; }
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
