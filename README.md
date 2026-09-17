@@ -10,10 +10,6 @@ Open space-taxi.html in any modern browser (Chrome, Firefox, Safari, Edge).
 
 The page works offline. It loads two typefaces (Cormorant Garamond and IBM Plex Sans) from Google Fonts when a connection is available and falls back to system fonts otherwise.
 
-To serve it locally instead:
-
-python3 -m http.server 8000
-# then visit http://localhost:8000/space-taxi.html
 Using the simulation
 The mission cycle
 The simulation starts on today's date with the taxi parked on Earth, and repeats this cycle indefinitely:
